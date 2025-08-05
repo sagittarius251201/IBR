@@ -18,16 +18,18 @@ df = load_data()
 # Sidebar
 with st.sidebar:
     st.header('Filters & Settings')
-    # Chain filter
-    chains = st.multiselect('Select Chains', options=df['Chain'].unique(), default=list(df['Chain'].unique()))
-    # Date range
-    start_date, end_date = st.date_input('Date Range', [df['Date'].min(), df['Date'].max()],
-                                         min_value=df['Date'].min(), max_value=df['Date'].max())
+    # Date range selector
+    start_date, end_date = st.date_input(
+        'Date Range', [df['Date'].min(), df['Date'].max()],
+        min_value=df['Date'].min(), max_value=df['Date'].max()
+    )
     # Metric selection
-    available_metrics = [c for c in df.columns if c not in ['Date','Chain']]
-    metrics = st.multiselect('Select Metrics', options=available_metrics,
-                             default=['Price (USD)','Market Cap (USD)'] if 'Price (USD)' in available_metrics and 'Market Cap (USD)' in available_metrics else available_metrics[:2])
-    # Traditional benchmarks
+    available_metrics = [c for c in df.columns if c != 'Date']
+    metrics = st.multiselect(
+        'Select Metrics', options=available_metrics,
+        default=available_metrics[:2]
+    )
+    # Traditional benchmarks selection
     trad_options = {'Visa Avg TPS':1700,'Visa Peak TPS':65000,'SWIFT Avg Settlement (days)':1.25}
     trad_metrics = st.multiselect('Traditional Benchmarks', options=list(trad_options.keys()), default=list(trad_options.keys()))
     # Chart type
@@ -36,7 +38,9 @@ with st.sidebar:
     st.write('**Color Theme**')
     color_seq = qualitative.Plotly
 
-# Filter data
+# Filter data by date
+data = df[(df['Date'] >= pd.to_datetime(start_date)) & (df['Date'] <= pd.to_datetime(end_date))]
+
 data = df[(df['Chain'].isin(chains)) & (df['Date']>=pd.to_datetime(start_date)) & (df['Date']<=pd.to_datetime(end_date))]
 
 # Tabs
