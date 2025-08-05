@@ -134,4 +134,9 @@ with tabs[3]:
         top3 = filtered.nlargest(3, 'Pct_Change')[['Date','Chain',primary,'Pct_Change']]
         st.subheader(f'Top 3 Growth Weeks: {primary}')
         st.dataframe(top3)
-        if len(metrics)
+                if len(metrics) > 1:
+            corr = filtered.pivot_table(index='Date', columns='Chain', values=metrics).corr()
+            st.subheader('Correlation Matrix')
+            st.dataframe(corr)
+            st.write('_High correlation suggests similar movement patterns._')
+
