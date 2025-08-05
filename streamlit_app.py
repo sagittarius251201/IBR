@@ -5,23 +5,34 @@ from plotly.colors import qualitative
 
 # Load and cache data
 @st.cache_data
+# Ensure to place your CSV in the same directory as this script
 def load_data():
     df = pd.read_csv('master_time_series_imputed.csv', parse_dates=['Date'])
-    df = df.loc[:, ~df.columns.duplicated()]  # drop duplicate columns
+    df = df.loc[:, ~df.columns.duplicated()]
     return df
 
 # App configuration
-st.set_page_config(page_title='Blockchain Metrics Dashboard', layout='wide', initial_sidebar_state='expanded')
+st.set_page_config(
+    page_title='Blockchain Metrics Dashboard',
+    layout='wide',
+    initial_sidebar_state='expanded'
+)
 
 df = load_data()
+# Determine if Chain column exists
+has_chain = 'Chain' in df.columns
 
 # Sidebar: Filters & Settings
 with st.sidebar:
     st.header('Filters & Settings')
-    # Chain selector
-    chains = st.multiselect(
-        'Select Chains', options=df['Chain'].unique(), default=list(df['Chain'].unique())
-    )
+    # Chain selector if available
+    if has_chain:
+        chains = st.multiselect(
+            'Select Chains', options=df['Chain'].unique(),
+            default=list(df['Chain'].unique())
+        )
+    else:
+        chains = None
     # Date range selector
     start_date, end_date = st.date_input(
         'Date Range', [df['Date'].min(), df['Date'].max()],
@@ -29,7 +40,9 @@ with st.sidebar:
     )
     st.markdown('---')
     # Metric selection
-    available_metrics = [c for c in df.columns if c not in ['Date', 'Chain']]
+    available_metrics = [c for c in df.columns if c != 'Date']
+    if has_chain:
+        available_metrics.remove('Chain')
     metrics = st.multiselect(
         'Select Metrics', options=available_metrics,
         default=available_metrics[:2]
@@ -42,21 +55,24 @@ with st.sidebar:
         'SWIFT Avg Settlement (days)': 1.25
     }
     trad_metrics = st.multiselect(
-        'Traditional Benchmarks', options=list(trad_defaults.keys()),
+        'Traditional Benchmarks',
+        options=list(trad_defaults.keys()),
         default=list(trad_defaults.keys())
     )
     st.markdown('---')
-    # Chart type
+    # Chart type selector
     chart_type = st.selectbox('Chart Type', ['Line', 'Area', 'Bar', 'Scatter'])
     st.markdown('---')
     st.write('**Color Theme**')
     color_seq = qualitative.Plotly
 
-# Filter data
-filtered = df[
-    (df['Chain'].isin(chains)) &
-    (df['Date'] >= pd.to_datetime(start_date)) &
-    (df['Date'] <= pd.to_datetime(end_date))
+# Filter data by sidebar
+filtered = df.copy()
+if has_chain:
+    filtered = filtered[filtered['Chain'].isin(chains)]
+filtered = filtered[
+    (filtered['Date'] >= pd.to_datetime(start_date)) &
+    (filtered['Date'] <= pd.to_datetime(end_date))
 ]
 
 # Create tabs
@@ -103,25 +119,32 @@ with tabs[1]:
         for m in metrics:
             if chart_type == 'Line':
                 fig = px.line(
-                    filtered, x='Date', y=m, color='Chain',
+                    filtered, x='Date', y=m,
+                    color='Chain' if has_chain else None,
                     title=m, color_discrete_sequence=color_seq
                 )
             elif chart_type == 'Area':
                 fig = px.area(
-                    filtered, x='Date', y=m, color='Chain',
+                    filtered, x='Date', y=m,
+                    color='Chain' if has_chain else None,
                     title=m, color_discrete_sequence=color_seq
                 )
             elif chart_type == 'Bar':
                 fig = px.bar(
-                    filtered, x='Date', y=m, color='Chain',
+                    filtered, x='Date', y=m,
+                    color='Chain' if has_chain else None,
                     barmode='group', title=m
                 )
             else:
-                fig = px.scatter(filtered, x='Date', y=m, color='Chain', title=m)
+                fig = px.scatter(
+                    filtered, x='Date', y=m,
+                    color='Chain' if has_chain else None,
+                    title=m
+                )
             fig.update_layout(hovermode='x unified', template='plotly_white')
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning('Please select at least one metric.')
+        st.warning('Please select at least one metric!')
 
 # Tab 3: Comparison
 with tabs[2]:
@@ -129,7 +152,8 @@ with tabs[2]:
     if metrics:
         comp = st.selectbox('Choose Blockchain Metric', options=metrics)
         fig = px.line(
-            filtered, x='Date', y=comp, color='Chain',
+            filtered, x='Date', y=comp,
+            color='Chain' if has_chain else None,
             title=f'{comp} vs Benchmarks', color_discrete_sequence=color_seq
         )
         for name, val in trad_defaults.items():
@@ -138,28 +162,29 @@ with tabs[2]:
         fig.update_layout(hovermode='x unified', template='plotly_white')
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning('Please select metrics in the sidebar.')
+        st.warning('No metrics selected.')
 
 # Tab 4: Insights
 with tabs[3]:
     st.title('Insights & Inferences')
     if metrics:
         primary = metrics[0]
-        filtered['Pct_Change'] = filtered.groupby('Chain')[primary].pct_change()
-        top3 = filtered.nlargest(3, 'Pct_Change')[['Date', 'Chain', primary, 'Pct_Change']]
+        filtered['Pct_Change'] = filtered.groupby('Chain')[primary].pct_change() if has_chain else filtered[primary].pct_change()
+        top3 = filtered.nlargest(3, 'Pct_Change')[['Date', 'Chain' if has_chain else pd.NA, primary, 'Pct_Change']]
         st.subheader(f'Top 3 Growth Weeks: {primary}')
         st.dataframe(top3)
         if len(metrics) > 1:
-            corr = filtered.pivot_table(index='Date', columns='Chain', values=metrics).corr()
+            corr = filtered[metrics].corr()
             st.subheader('Correlation Matrix')
             st.dataframe(corr)
             st.write('_High correlation suggests similar movement patterns._')
     else:
-        st.warning('Select metrics for insights.')
+        st.warning('No metrics selected for insights.')
 
 # Tab 5: Download
 with tabs[4]:
     st.title('Download Filtered Data')
-    download_df = filtered[['Date', 'Chain'] + metrics]
+    dl_cols = ['Date'] + (['Chain'] if has_chain else []) + metrics
+    download_df = filtered[dl_cols]
     csv = download_df.to_csv(index=False).encode('utf-8')
     st.download_button('Download CSV', data=csv, file_name='dashboard_export.csv', mime='text/csv')
