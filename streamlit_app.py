@@ -13,7 +13,6 @@ def load_data():
 # App configuration
 st.set_page_config(page_title='Blockchain Metrics Dashboard', layout='wide', initial_sidebar_state='expanded')
 
-# Load data
 df = load_data()
 
 # Sidebar: Filters & Settings
@@ -37,7 +36,11 @@ with st.sidebar:
     )
     st.markdown('---')
     # Traditional benchmarks
-    trad_defaults = {'Visa Avg TPS': 1700, 'Visa Peak TPS': 65000, 'SWIFT Avg Settlement (days)': 1.25}
+    trad_defaults = {
+        'Visa Avg TPS': 1700,
+        'Visa Peak TPS': 65000,
+        'SWIFT Avg Settlement (days)': 1.25
+    }
     trad_metrics = st.multiselect(
         'Traditional Benchmarks', options=list(trad_defaults.keys()),
         default=list(trad_defaults.keys())
@@ -80,16 +83,16 @@ with tabs[0]:
     )
     st.subheader('Key Regulatory Milestones')
     events = [
-        ('2018-10-01','FATF 1st Guidance','Global','Defined VASP AML/CFT requirements'),
-        ('2019-06-21','FATF VASP Guidance','Global','Introduced the Travel Rule'),
-        ('2021-10-28','FATF Updated Guidance','Global','Expanded to stablecoins, DeFi, NFTs'),
-        ('2023-06-09','MiCA Published','EU','Unified regulation framework'),
-        ('2023-06-29','MiCA In Force','EU','Start of regulated services'),
-        ('2024-02-22','MiCA Delegated Acts','EU','Technical standards enacted'),
-        ('2023-02-07','VARA Framework','Dubai','Licensing and governance rules'),
-        ('2018-06-25','ADGM Regime','Abu Dhabi','First MENA crypto sandbox')
+        ('2018-10-01', 'FATF 1st Guidance', 'Global', 'Defined VASP AML/CFT requirements'),
+        ('2019-06-21', 'FATF VASP Guidance', 'Global', 'Introduced the Travel Rule'),
+        ('2021-10-28', 'FATF Updated Guidance', 'Global', 'Expanded to stablecoins, DeFi, NFTs'),
+        ('2023-06-09', 'MiCA Published', 'EU', 'Unified regulation framework'),
+        ('2023-06-29', 'MiCA In Force', 'EU', 'Start of regulated services'),
+        ('2024-02-22', 'MiCA Delegated Acts', 'EU', 'Technical standards enacted'),
+        ('2023-02-07', 'VARA Framework', 'Dubai', 'Licensing and governance rules'),
+        ('2018-06-25', 'ADGM Regime', 'Abu Dhabi', 'First MENA crypto sandbox')
     ]
-    ev_df = pd.DataFrame(events, columns=['Date','Event','Region','Impact'])
+    ev_df = pd.DataFrame(events, columns=['Date', 'Event', 'Region', 'Impact'])
     ev_df['Date'] = pd.to_datetime(ev_df['Date'])
     st.dataframe(ev_df, use_container_width=True)
 
@@ -99,11 +102,20 @@ with tabs[1]:
     if metrics:
         for m in metrics:
             if chart_type == 'Line':
-                fig = px.line(filtered, x='Date', y=m, color='Chain', title=m, color_discrete_sequence=color_seq)
+                fig = px.line(
+                    filtered, x='Date', y=m, color='Chain',
+                    title=m, color_discrete_sequence=color_seq
+                )
             elif chart_type == 'Area':
-                fig = px.area(filtered, x='Date', y=m, color='Chain', title=m, color_discrete_sequence=color_seq)
+                fig = px.area(
+                    filtered, x='Date', y=m, color='Chain',
+                    title=m, color_discrete_sequence=color_seq
+                )
             elif chart_type == 'Bar':
-                fig = px.bar(filtered, x='Date', y=m, color='Chain', barmode='group', title=m)
+                fig = px.bar(
+                    filtered, x='Date', y=m, color='Chain',
+                    barmode='group', title=m
+                )
             else:
                 fig = px.scatter(filtered, x='Date', y=m, color='Chain', title=m)
             fig.update_layout(hovermode='x unified', template='plotly_white')
@@ -116,7 +128,10 @@ with tabs[2]:
     st.title('Blockchain vs Traditional Benchmarks')
     if metrics:
         comp = st.selectbox('Choose Blockchain Metric', options=metrics)
-        fig = px.line(filtered, x='Date', y=comp, color='Chain', title=f'{comp} vs Benchmarks', color_discrete_sequence=color_seq)
+        fig = px.line(
+            filtered, x='Date', y=comp, color='Chain',
+            title=f'{comp} vs Benchmarks', color_discrete_sequence=color_seq
+        )
         for name, val in trad_defaults.items():
             if name in trad_metrics:
                 fig.add_hline(y=val, line_dash='dash', annotation_text=name)
@@ -131,12 +146,20 @@ with tabs[3]:
     if metrics:
         primary = metrics[0]
         filtered['Pct_Change'] = filtered.groupby('Chain')[primary].pct_change()
-        top3 = filtered.nlargest(3, 'Pct_Change')[['Date','Chain',primary,'Pct_Change']]
+        top3 = filtered.nlargest(3, 'Pct_Change')[['Date', 'Chain', primary, 'Pct_Change']]
         st.subheader(f'Top 3 Growth Weeks: {primary}')
         st.dataframe(top3)
-                if len(metrics) > 1:
+        if len(metrics) > 1:
             corr = filtered.pivot_table(index='Date', columns='Chain', values=metrics).corr()
             st.subheader('Correlation Matrix')
             st.dataframe(corr)
             st.write('_High correlation suggests similar movement patterns._')
+    else:
+        st.warning('Select metrics for insights.')
 
+# Tab 5: Download
+with tabs[4]:
+    st.title('Download Filtered Data')
+    download_df = filtered[['Date', 'Chain'] + metrics]
+    csv = download_df.to_csv(index=False).encode('utf-8')
+    st.download_button('Download CSV', data=csv, file_name='dashboard_export.csv', mime='text/csv')
