@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# --- Data loading with caching for performance ----------------------------
+# --- Data loading with caching --------------------------------------------
 
 @st.cache_data
 def load_chain_wide():
@@ -14,12 +14,10 @@ def load_chain_wide():
         files = sorted(data_dir.glob("master_chain_metrics*.csv"))
         if files:
             sample = pd.read_csv(files[0], nrows=0)
-            # detect date column
             date_cols = [c for c in ("Date", "date") if c in sample.columns]
             df = pd.read_csv(files[0], parse_dates=date_cols)
             df.columns = [c.lower() for c in df.columns]
-            # ensure a lowercase 'date' column
-            if "date" not in df.columns and "Date" in df.columns:
+            if "date" not in df.columns and "date" in df.columns:
                 df = df.rename(columns={"Date": "date"})
             return df
     return pd.DataFrame()
@@ -67,14 +65,19 @@ df_wide = load_chain_wide()
 reg_df = load_regulatory()
 bench_df = load_benchmarks()
 
-# --- Prepare long-form for interactive pages -----------------------------
+# --- Build long-form chain_df safely --------------------------------------
+chains = ["bitcoin","ethereum","solana"]
+chain_records = []
 if not df_wide.empty and "date" in df_wide.columns:
-    long = df_wide.melt(id_vars=["date"], var_name="metric_chain", value_name="value")
-    long["metric_chain"] = long["metric_chain"].astype(str)
-    split = long["metric_chain"].str.rsplit("_", n=1, expand=True)
-    long["metric"] = split[0]
-    long["chain"]  = split[1]
-    chain_df = long.dropna(subset=["value"])
+    for chain in chains:
+        # find all columns ending with _chain
+        for col in df_wide.columns:
+            if col.endswith(f"_{chain}"):
+                metric = col[: - (len(chain) + 1)]
+                sub = df_wide[["date", col]].rename(columns={col: "value"})
+                sub = sub.assign(chain=chain, metric=metric)
+                chain_records.append(sub.dropna(subset=["value"]))
+    chain_df = pd.concat(chain_records, ignore_index=True)
 else:
     chain_df = pd.DataFrame()
 
@@ -111,17 +114,15 @@ elif page == "Data Overview":
 
 elif page == "Insights":
     st.title("💡 Dynamic Insights")
-    if chain_df.empty or "chain" not in chain_df.columns:
+    if chain_df.empty:
         st.warning("No data to show.")
         st.stop()
-    # Now safe to use chain_df["chain"]
     col1, col2 = st.columns(2)
     with col1:
-        chains = sorted(chain_df["chain"].unique())
         chain_sel = st.selectbox("Chain", chains)
     with col2:
-        metrics = sorted(chain_df["metric"].unique())
-        metric_sel = st.selectbox("Metric", metrics)
+        metrics_list = sorted(chain_df["metric"].unique())
+        metric_sel = st.selectbox("Metric", metrics_list)
     dfc = chain_df[(chain_df.chain == chain_sel) & (chain_df.metric == metric_sel)]
     if dfc.empty:
         st.warning("No data for this selection.")
@@ -140,16 +141,17 @@ elif page == "Insights":
 
 elif page == "Comparison":
     st.title("⚔️ Chain & Legacy Comparison")
-    if chain_df.empty or "chain" not in chain_df.columns:
+    if chain_df.empty:
         st.warning("No data to compare.")
         st.stop()
     st.markdown("**Select metric, date range, chart type, and toggle benchmarks.**")
-    metrics = sorted(chain_df["metric"].unique())
-    metric_sel = st.selectbox("Metric", metrics)
+    metrics_list = sorted(chain_df["metric"].unique())
+    metric_sel = st.selectbox("Metric", metrics_list)
     dmin, dmax = chain_df["date"].min(), chain_df["date"].max()
     start, end = st.slider("Date Range", value=(dmin, dmax), min_value=dmin, max_value=dmax)
     chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
     show_bench = st.checkbox("Show Traditional Benchmarks", value=True)
+
     dfc = chain_df[(chain_df.metric == metric_sel) & (chain_df.date.between(start, end))]
     pivot = dfc.pivot(index="date", columns="chain", values="value")
 
@@ -169,7 +171,7 @@ elif page == "Comparison":
 
     fig.update_layout(title=metric_sel.replace("_"," ").title(), margin=dict(l=20,r=20,t=40,b=20))
     st.plotly_chart(fig, use_container_width=True)
-    # Insights table
+
     summary = pivot.loc[start:end].agg(["first","last"]).T
     summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
     st.dataframe(
