@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# --- Data loading with caching --------------------------------------------
+# --- Data loading with caching for performance ----------------------------
 
 @st.cache_data
 def load_chain_wide():
@@ -14,11 +14,13 @@ def load_chain_wide():
         files = sorted(data_dir.glob("master_chain_metrics*.csv"))
         if files:
             sample = pd.read_csv(files[0], nrows=0)
-            date_cols = [c for c in ("Date","date") if c in sample.columns]
+            # detect date column
+            date_cols = [c for c in ("Date", "date") if c in sample.columns]
             df = pd.read_csv(files[0], parse_dates=date_cols)
             df.columns = [c.lower() for c in df.columns]
+            # ensure a lowercase 'date' column
             if "date" not in df.columns and "Date" in df.columns:
-                df = df.rename(columns={"Date":"date"})
+                df = df.rename(columns={"Date": "date"})
             return df
     return pd.DataFrame()
 
@@ -34,14 +36,18 @@ def load_regulatory():
 @st.cache_data
 def load_benchmarks():
     data = {
-        "benchmark": ["visa_avg_tps","visa_peak_tps","mc_avg_tps","mc_peak_tps",
-                      "swift_settlement_days","dtcc_tplus1_adoption_pct","t2s_settlement_days"],
+        "benchmark": [
+            "visa_avg_tps","visa_peak_tps","mc_avg_tps","mc_peak_tps",
+            "swift_settlement_days","dtcc_tplus1_adoption_pct","t2s_settlement_days"
+        ],
         "value": [1700,65000,5000,59000,1.25,95,0.10]
     }
     df = pd.DataFrame(data)
     df["label"] = df["benchmark"].map({
-        "visa_avg_tps":"Visa Avg TPS","visa_peak_tps":"Visa Peak TPS",
-        "mc_avg_tps":"Mastercard Avg TPS","mc_peak_tps":"Mastercard Peak TPS",
+        "visa_avg_tps":"Visa Avg TPS",
+        "visa_peak_tps":"Visa Peak TPS",
+        "mc_avg_tps":"Mastercard Avg TPS",
+        "mc_peak_tps":"Mastercard Peak TPS",
         "swift_settlement_days":"SWIFT gpi Avg Settlement (days)",
         "dtcc_tplus1_adoption_pct":"DTCC T+1 Adoption (%)",
         "t2s_settlement_days":"ECB T2S Avg Settlement (days)"
@@ -107,67 +113,66 @@ elif page == "Insights":
     st.title("💡 Dynamic Insights")
     if chain_df.empty or "chain" not in chain_df.columns:
         st.warning("No data to show.")
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            chains = sorted(chain_df["chain"].unique())
-            chain_sel = st.selectbox("Chain", chains)
-        with col2:
-            metrics = sorted(chain_df["metric"].unique())
-            metric_sel = st.selectbox("Metric", metrics)
-        dfc = chain_df[(chain_df.chain==chain_sel)&(chain_df.metric==metric_sel)]
-        if dfc.empty:
-            st.warning("No data for this selection.")
-        else:
-            dfc = dfc.set_index("date").sort_index()
-            latest = dfc["value"].iat[-1]
-            st.metric(f"{metric_sel.replace('_',' ').title()} ({chain_sel.title()})", f"{latest:.4f}")
-            fig = px.line(
-                dfc, y="value",
-                title=f"{metric_sel.replace('_',' ').title()} — {chain_sel.title()}",
-                labels={"value":metric_sel.replace("_"," ").title(), "date":"Date"}
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            pct = (dfc["value"].iloc[-1]/dfc["value"].iloc[0] - 1)*100
-            st.markdown(f"**Insight:** {chain_sel.title()}'s **{metric_sel.replace('_',' ').title()}** changed **{pct:.1f}%** since {dfc.index[0].date()}.")
+        st.stop()
+    # Now safe to use chain_df["chain"]
+    col1, col2 = st.columns(2)
+    with col1:
+        chains = sorted(chain_df["chain"].unique())
+        chain_sel = st.selectbox("Chain", chains)
+    with col2:
+        metrics = sorted(chain_df["metric"].unique())
+        metric_sel = st.selectbox("Metric", metrics)
+    dfc = chain_df[(chain_df.chain == chain_sel) & (chain_df.metric == metric_sel)]
+    if dfc.empty:
+        st.warning("No data for this selection.")
+        st.stop()
+    dfc = dfc.set_index("date").sort_index()
+    latest = dfc["value"].iat[-1]
+    st.metric(f"{metric_sel.replace('_',' ').title()} ({chain_sel.title()})", f"{latest:.4f}")
+    fig = px.line(
+        dfc, y="value",
+        title=f"{metric_sel.replace('_',' ').title()} — {chain_sel.title()}",
+        labels={"value": metric_sel.replace("_"," ").title(), "date":"Date"}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    pct = (dfc["value"].iloc[-1] / dfc["value"].iloc[0] - 1) * 100
+    st.markdown(f"**Insight:** {chain_sel.title()}'s **{metric_sel.replace('_',' ').title()}** changed **{pct:.1f}%** since {dfc.index[0].date()}.")
 
 elif page == "Comparison":
     st.title("⚔️ Chain & Legacy Comparison")
     if chain_df.empty or "chain" not in chain_df.columns:
         st.warning("No data to compare.")
+        st.stop()
+    st.markdown("**Select metric, date range, chart type, and toggle benchmarks.**")
+    metrics = sorted(chain_df["metric"].unique())
+    metric_sel = st.selectbox("Metric", metrics)
+    dmin, dmax = chain_df["date"].min(), chain_df["date"].max()
+    start, end = st.slider("Date Range", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+    chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
+    show_bench = st.checkbox("Show Traditional Benchmarks", value=True)
+    dfc = chain_df[(chain_df.metric == metric_sel) & (chain_df.date.between(start, end))]
+    pivot = dfc.pivot(index="date", columns="chain", values="value")
+
+    # Build figure
+    if chart_type == "Line":
+        fig = go.Figure()
+        for c in pivot.columns:
+            fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c.title()))
+        if show_bench and metric_sel in bench_df["benchmark"].values:
+            for _, row in bench_df[bench_df["benchmark"] == metric_sel].iterrows():
+                fig.add_hline(y=row.value, line_dash="dash", annotation_text=row.label, annotation_position="top left")
+    elif chart_type == "Area":
+        fig = px.area(pivot, x=pivot.index, y=pivot.columns)
     else:
-        st.markdown("**Select metric, date range, chart type, and toggle benchmarks.**")
-        metrics = sorted(chain_df["metric"].unique())
-        metric_sel = st.selectbox("Metric", metrics)
-        dmin, dmax = chain_df["date"].min(), chain_df["date"].max()
-        start, end = st.slider("Date Range", value=(dmin, dmax), min_value=dmin, max_value=dmax)
-        chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
-        show_bench = st.checkbox("Show Traditional Benchmarks", value=True)
+        monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
+        fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
 
-        dfc = chain_df[(chain_df.metric==metric_sel)&(chain_df.date.between(start, end))]
-        pivot = dfc.pivot(index="date", columns="chain", values="value")
-
-        # Build figure
-        if chart_type == "Line":
-            fig = go.Figure()
-            for c in pivot.columns:
-                fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c.title()))
-            if show_bench and metric_sel in bench_df["benchmark"].values:
-                for _, row in bench_df[bench_df["benchmark"]==metric_sel].iterrows():
-                    fig.add_hline(y=row.value, line_dash="dash", annotation_text=row.label, annotation_position="top left")
-        elif chart_type == "Area":
-            fig = px.area(pivot, x=pivot.index, y=pivot.columns)
-        else:  # Bar chart aggregated monthly
-            monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
-            fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
-
-        fig.update_layout(title=metric_sel.replace("_"," ").title(), margin=dict(l=20,r=20,t=40,b=20))
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Insights table
-        summary = pivot.loc[start:end].agg(["first","last"]).T
-        summary["% Change"] = (summary["last"]/summary["first"] - 1)*100
-        st.dataframe(
-            summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
-            use_container_width=True
-        )
+    fig.update_layout(title=metric_sel.replace("_"," ").title(), margin=dict(l=20,r=20,t=40,b=20))
+    st.plotly_chart(fig, use_container_width=True)
+    # Insights table
+    summary = pivot.loc[start:end].agg(["first","last"]).T
+    summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
+    st.dataframe(
+        summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
+        use_container_width=True
+    )
