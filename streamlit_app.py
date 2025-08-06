@@ -7,13 +7,15 @@ import plotly.express as px
 
 @st.cache_data
 def load_chain_data():
-    # Try data/ folder first, then repo root
     base = Path(__file__).parent
-    for sub in ["data", "."]:
+    for sub in ("data", "."):
         data_dir = base / sub
         csvs = sorted(data_dir.glob("master_chain_metrics*.csv"))
         if csvs:
-            df = pd.read_csv(csvs[0], parse_dates=["Date"])
+            # Detect which date column exists
+            sample = pd.read_csv(csvs[0], nrows=0)
+            parse_cols = [c for c in ("Date", "date") if c in sample.columns]
+            df = pd.read_csv(csvs[0], parse_dates=parse_cols)
             df.columns = [c.lower() for c in df.columns]
             return df
     st.error("No `master_chain_metrics*.csv` found in data/ or repo root.")
@@ -22,7 +24,7 @@ def load_chain_data():
 @st.cache_data
 def load_regulatory_data():
     base = Path(__file__).parent
-    for sub in ["data", "."]:
+    for sub in ("data", "."):
         path = base / sub / "regulatory_milestones.csv"
         if path.exists():
             df = pd.read_csv(path, parse_dates=["Date"])
@@ -72,18 +74,18 @@ if page == "Research Objectives":
 
 elif page == "Regulatory Decisions":
     st.title("⚖️ Regulatory & Institutional Milestones")
-    st.dataframe(
-        reg_df.sort_values("Date").reset_index(drop=True),
-        use_container_width=True
-    )
+    if not reg_df.empty:
+        st.dataframe(reg_df.sort_values("Date").reset_index(drop=True), use_container_width=True)
+    else:
+        st.warning("No regulatory data loaded.")
 
 # --- Page: Data Overview ---------------------------------------------------
 
 elif page == "Data Overview":
     st.title("🔍 Data Overview")
     if not chain_df.empty:
-        days = chain_df['date'].nunique() if 'date' in chain_df else len(chain_df)
-        chains = chain_df['chain'].nunique() if 'chain' in chain_df else "?"
+        days = chain_df["date"].nunique()
+        chains = chain_df["chain"].nunique()
         st.write(f"Data covers {days} days × {chains} chains.")
         st.dataframe(chain_df.head(10), use_container_width=True)
         with st.expander("Show all columns"):
@@ -99,7 +101,7 @@ elif page == "Insights":
         st.warning("No chain data to show.")
     else:
         chains = sorted(chain_df["chain"].unique())
-        chain_sel = st.selectbox("Select Chain", chains, index=0)
+        chain_sel = st.selectbox("Select Chain", chains)
         metrics = [c for c in chain_df.columns if c not in ["date", "chain"]]
         metric_sel = st.selectbox("Select Metric", metrics)
         dfc = chain_df[chain_df["chain"] == chain_sel]
@@ -129,7 +131,7 @@ elif page == "Comparison":
         st.warning("No chain data to compare.")
     else:
         metrics = [c for c in chain_df.columns if c not in ["date","chain"]]
-        metric_sel = st.selectbox("Metric to Compare", metrics, index=0)
+        metric_sel = st.selectbox("Metric to Compare", metrics)
         pivot = chain_df.pivot(index="date", columns="chain", values=metric_sel)
         fig = px.line(
             pivot,
