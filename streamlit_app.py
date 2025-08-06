@@ -1,59 +1,132 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# --- Data loading functions -----------------------------------------------
+
 @st.cache_data
 def load_chain_data():
-    return pd.read_csv(Path(__file__).parent / 'data' / 'master_chain_metrics_updated.csv', parse_dates=['date'])
+    data_dir = Path(__file__).parent / "data"
+    # find the first CSV matching our master chain metrics
+    csvs = sorted(data_dir.glob("master_chain_metrics*.csv"))
+    if not csvs:
+        st.error(f"No master_chain_metrics CSV found in {data_dir}")
+        return pd.DataFrame()
+    df = pd.read_csv(csvs[0], parse_dates=["Date"])
+    # standardize column names to lowercase
+    df.columns = [c.lower() for c in df.columns]
+    return df
 
 @st.cache_data
 def load_regulatory_data():
-    return pd.read_csv(Path(__file__).parent / 'data' / 'regulatory_milestones.csv', parse_dates=['Date'])
+    data_dir = Path(__file__).parent / "data"
+    path = data_dir / "regulatory_milestones.csv"
+    if not path.exists():
+        st.error(f"No regulatory_milestones.csv found in {data_dir}")
+        return pd.DataFrame()
+    df = pd.read_csv(path, parse_dates=["Date"])
+    return df
 
-st.set_page_config(page_title='Blockchain Dashboard', layout='wide')
+# --- App configuration -----------------------------------------------------
+
+st.set_page_config(
+    page_title="Blockchain Insights Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- Sidebar navigation ----------------------------------------------------
 
 st.sidebar.title("Navigation")
-tabs = ["Research Objectives", "Regulatory Decisions", "Data Overview", "Insights", "Comparison"]
-choice = st.sidebar.radio("Go to", tabs)
+pages = [
+    "Research Objectives",
+    "Regulatory Decisions",
+    "Data Overview",
+    "Insights",
+    "Comparison",
+]
+page = st.sidebar.radio("Go to", pages)
 
-chain_data = load_chain_data()
-reg_data = load_regulatory_data()
+# Load data
+chain_df = load_chain_data()
+reg_df = load_regulatory_data()
 
-if choice == "Research Objectives":
-    st.title("Research Objectives")
-    st.markdown("""
+# --- Page: Research Objectives --------------------------------------------
 
-1. Explain core blockchain concepts.
-2. Document current and future applications in finance.
-3. Quantify benefits: cost, efficiency, transparency.
-4. Examine regulatory & security challenges.
-5. Analyze adoption rates & market trends.
-    """)
+if page == "Research Objectives":
+    st.title("📋 Research Objectives")
+    st.markdown(
+        """
+1. **Core Concepts:** Explain blockchain fundamentals (decentralization, consensus, smart contracts).  
+2. **Applications:** Document current & future use-cases in finance (DeFi, trade finance, CBDC).  
+3. **Benefits:** Quantify cost, efficiency, transparency gains vs. legacy.  
+4. **Challenges:** Examine regulatory, security, scalability obstacles.  
+5. **Adoption Trends:** Analyze on-chain adoption & institutional uptake (2016–2025).
+        """
+    )
 
-elif choice == "Regulatory Decisions":
-    st.title("Regulatory & Institutional Milestones")
-    st.dataframe(reg_data)
+# --- Page: Regulatory Decisions -------------------------------------------
 
-elif choice == "Data Overview":
-    st.title("Data Overview")
-    st.write(chain_data.head())
-    st.write("Data loaded with {} rows and {} columns.".format(*chain_data.shape))
+elif page == "Regulatory Decisions":
+    st.title("⚖️ Regulatory & Institutional Milestones")
+    st.dataframe(
+        reg_df.sort_values("Date").reset_index(drop=True),
+        use_container_width=True
+    )
 
-elif choice == "Insights":
-    st.title("Dynamic Insights")
-    metric = st.selectbox("Select Metric", [col for col in chain_data.columns if col not in ['date','chain']])
-    chain = st.selectbox("Select Chain", chain_data['chain'].unique())
-    df = chain_data[chain_data['chain']==chain]
-    latest = df.iloc[-1][metric]
-    st.metric(label=f"{metric} ({chain}) Latest", value=round(latest,4))
-    st.line_chart(df.set_index('date')[metric])
+# --- Page: Data Overview ---------------------------------------------------
 
-elif choice == "Comparison":
-    st.title("Chain Comparison")
-    metric = st.selectbox("Metric to Compare", [col for col in chain_data.columns if col not in ['date','chain']])
-    df_pivot = chain_data.pivot(index='date', columns='chain', values=metric)
-    fig = px.line(df_pivot, labels={'value':metric, 'date':'Date'})
+elif page == "Data Overview":
+    st.title("🔍 Data Overview")
+    st.write(f"Data covers {chain_df['date'].nunique()} days × {chain_df['chain'].nunique()} chains.")
+    st.dataframe(chain_df.head(10), use_container_width=True)
+    with st.expander("Show all columns"):
+        st.write(list(chain_df.columns))
+
+# --- Page: Insights --------------------------------------------------------
+
+elif page == "Insights":
+    st.title("💡 Dynamic Insights")
+    # Select chain and metric
+    chains = sorted(chain_df["chain"].unique())
+    chain_sel = st.selectbox("Select Chain", chains, index=chains.index("bitcoin"))
+    metric_cols = [c for c in chain_df.columns if c not in ["date", "chain"]]
+    metric_sel = st.selectbox("Select Metric", metric_cols)
+
+    df_chain = chain_df[chain_df["chain"] == chain_sel]
+    latest = df_chain.iloc[-1][metric_sel]
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.metric(
+            label=f"Latest {metric_sel.replace('_', ' ').title()} ({chain_sel.title()})",
+            value=f"{latest:.4f}"
+        )
+    with col2:
+        fig = px.line(
+            df_chain, x="date", y=metric_sel,
+            title=f"{metric_sel.replace('_', ' ').title()} Over Time — {chain_sel.title()}",
+            labels={"date": "Date", metric_sel: metric_sel.replace("_", " ").title()}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+# --- Page: Comparison ------------------------------------------------------
+
+elif page == "Comparison":
+    st.title("⚔️ Chain Comparison")
+    metric_cols = [c for c in chain_df.columns if c not in ["date", "chain"]]
+    metric_sel = st.selectbox("Metric to Compare", metric_cols)
+
+    pivot = chain_df.pivot(index="date", columns="chain", values=metric_sel)
+    fig = px.line(
+        pivot,
+        labels={"value": metric_sel.replace("_", " ").title(), "date": "Date"},
+        title=f"Comparison of {metric_sel.replace('_', ' ').title()}"
+    )
     st.plotly_chart(fig, use_container_width=True)
+
+# --- End of app ------------------------------------------------------------
+
