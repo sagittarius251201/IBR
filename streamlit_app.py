@@ -279,9 +279,18 @@ elif page == "Comparison":
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary
-    summary = pivot.loc[pd.to_datetime(start_dt):pd.to_datetime(end_dt)].agg(["first", "last"]).T
-    summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
-    st.dataframe(
-        summary.rename(columns={"first": "Start", "last": "End"})[["Start", "End", "% Change"]],
-        use_container_width=True
-    )
+    if not dfc.empty:
+        # first/last values and percent change
+        summary = (
+            pivot
+            .loc[pd.to_datetime(start_dt):pd.to_datetime(end_dt)]
+            .agg(["first", "last"])
+            .T
+        )
+        summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
+        st.dataframe(
+            summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
+            use_container_width=True
+        )
+    else:
+        st.info("No data points in the selected date range to summarize.")
