@@ -4,8 +4,20 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from statsmodels.tsa.seasonal import STL
-from prophet import Prophet
+
+# Try import STL, Prophet
+has_stl = has_prophet = False
+try:
+    from statsmodels.tsa.seasonal import STL
+    has_stl = True
+except ModuleNotFoundError:
+    pass
+
+try:
+    from prophet import Prophet
+    has_prophet = True
+except ModuleNotFoundError:
+    pass
 
 # --- Caching data loads for performance -----------------------------------
 @st.cache_data
@@ -49,18 +61,20 @@ def load_benchmarks():
     })
     return df
 
-# --- Setup ------------------------------------------------------------
+# --- App config ------------------------------------------------------------
 st.set_page_config(page_title="Blockchain & Finance Dashboard", layout="wide")
 st.sidebar.title("Navigation")
-tabs = ["Research Objectives","Regulatory Timeline","Data Overview","Insights","Risk & Correlation","Forecast","Comparison"]
+tabs = ["Research Objectives","Regulatory Timeline","Data Overview","Insights","Risk & Correlation"]
+if has_prophet: tabs += ["Forecast"]
+tabs += ["Comparison"]
 page = st.sidebar.radio("Go to", tabs)
 
-# --- Load everything ----------------------------------------------
-df_wide   = load_chain_wide()
-reg_df    = load_regulatory()
-bench_df  = load_benchmarks()
+# --- Load data ------------------------------------------------------------
+df_wide  = load_chain_wide()
+reg_df   = load_regulatory()
+bench_df = load_benchmarks()
 
-# --- Build long chain_df ------------------------------------------------
+# --- Build long chain_df ---------------------------------------------
 chains = ["bitcoin","ethereum","solana"]
 records = []
 if not df_wide.empty and "date" in df_wide.columns:
@@ -72,7 +86,8 @@ if not df_wide.empty and "date" in df_wide.columns:
                 sub["chain"], sub["metric"] = chain, metric
                 records.append(sub)
     chain_df = pd.concat(records, ignore_index=True) if records else pd.DataFrame()
-    chain_df["date"] = pd.to_datetime(chain_df["date"])
+    if not chain_df.empty:
+        chain_df["date"] = pd.to_datetime(chain_df["date"])
 else:
     chain_df = pd.DataFrame()
 
@@ -92,8 +107,7 @@ elif page=="Regulatory Timeline":
     if reg_df.empty:
         st.warning("No regulatory data.")
     else:
-        fig = px.timeline(reg_df, x_start="Date", x_end="Date", y="Milestone",
-                          title="Key Regulatory Milestones")
+        fig = px.timeline(reg_df, x_start="Date", x_end="Date", y="Milestone", title="Key Regulatory Milestones")
         fig.update_yaxes(autorange="reversed")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -111,22 +125,21 @@ elif page=="Insights":
     st.title("💡 Dynamic Insights")
     if chain_df.empty:
         st.warning("No data.")
-    else:
-        c1,c2 = st.columns(2)
-        with c1:
-            chain = st.selectbox("Chain", chains)
-        with c2:
-            metric = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
-        dfc = chain_df[(chain_df.chain==chain)&(chain_df.metric==metric)].set_index("date").sort_index()
-        if dfc.empty:
-            st.warning("No data for selection.")
-        else:
-            latest = dfc["value"].iat[-1]
-            st.metric(f"{metric.title()} ({chain.title()})", f"{latest:.4f}")
-            fig = px.line(dfc, y="value", title=f"{metric.title()} over time")
-            st.plotly_chart(fig, use_container_width=True)
-            pct = (dfc["value"].iloc[-1]/dfc["value"].iloc[0]-1)*100
-            st.markdown(f"**Insight:** {chain.title()}'s {metric} changed **{pct:.1f}%** since {dfc.index[0].date()}.")
+        st.stop()
+    c1,c2 = st.columns(2)
+    with c1:
+        chain_sel = st.selectbox("Chain", chains)
+    with c2:
+        metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
+    dfc = chain_df[(chain_df.chain==chain_sel)&(chain_df.metric==metric_sel)].set_index("date").sort_index()
+    if dfc.empty:
+        st.warning("No data for selection.")
+        st.stop()
+    st.metric(f"{metric_sel.title()} ({chain_sel.title()})", f"{dfc['value'].iat[-1]:.4f}")
+    fig = px.line(dfc, y="value", title=f"{metric_sel.title()} over time", labels={"value": metric_sel.title()})
+    st.plotly_chart(fig, use_container_width=True)
+    pct = (dfc["value"].iloc[-1]/dfc["value"].iloc[0]-1)*100
+    st.markdown(f"**Insight:** {chain_sel.title()}'s {metric_sel.title()} changed **{pct:.1f}%** since {dfc.index[0].date()}.")
 
 elif page=="Risk & Correlation":
     st.title("📈 Volatility & Correlation")
@@ -140,7 +153,7 @@ elif page=="Risk & Correlation":
         fig = px.imshow(corr, text_auto=True, title="Correlation: Daily Tx across Chains")
         st.plotly_chart(fig, use_container_width=True)
 
-elif page=="Forecast":
+elif page=="Forecast" and has_prophet:
     st.title("🔮 Price Forecast (Bitcoin)")
     if "price_bitcoin" in df_wide.columns:
         dfp = df_wide[["date","price_bitcoin"]].rename(columns={"date":"ds","price_bitcoin":"y"}).dropna()
@@ -153,37 +166,35 @@ elif page=="Forecast":
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No price data.")
+elif page=="Forecast":
+    st.warning("Prophet not installed. Forecast unavailable.")
 
 elif page=="Comparison":
     st.title("⚔️ Chain & Legacy Comparison")
     if chain_df.empty:
         st.warning("No data.")
+        st.stop()
+    metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
+    dmin,dmax = chain_df.date.min().date(), chain_df.date.max().date()
+    start,end = st.slider("Date Range",(dmin,dmax),value=(dmin,dmax))
+    chart = st.selectbox("Chart Type",["Line","Area","Bar"])
+    show_bench = st.checkbox("Show Benchmarks", True)
+    dfc = chain_df[(chain_df.metric==metric_sel)&(chain_df.date.between(pd.to_datetime(start),pd.to_datetime(end)))]
+    pivot = dfc.pivot(index="date", columns="chain", values="value")
+    if chart=="Line":
+        fig = go.Figure()
+        for c in pivot.columns:
+            fig.add_trace(go.Scatter(x=pivot.index,y=pivot[c],mode="lines",name=c.title()))
+        if show_bench and metric_sel in bench_df.benchmark.values:
+            for _,r in bench_df[bench_df.benchmark==metric_sel].iterrows():
+                fig.add_hline(y=r.value,line_dash="dash",annotation_text=r.label)
+    elif chart=="Area":
+        fig = px.area(pivot, x=pivot.index, y=pivot.columns)
     else:
-        metric = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
-        start,end = st.slider("Date Range",
-                              min_value=chain_df.date.min().date(),
-                              max_value=chain_df.date.max().date(),
-                              value=(chain_df.date.min().date(), chain_df.date.max().date()))
-        ctype = st.selectbox("Chart Type", ["Line","Area","Bar"])
-        show_bench = st.checkbox("Show Benchmarks", True)
-        dfc = chain_df[(chain_df.metric==metric)&
-                       (chain_df.date.between(start,end))]
-        pivot = dfc.pivot(index="date", columns="chain", values="value")
-        if ctype=="Line":
-            fig = go.Figure()
-            for c in pivot.columns:
-                fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c.title()))
-            if show_bench and metric in bench_df.benchmark.values:
-                for _,r in bench_df[bench_df.benchmark==metric].iterrows():
-                    fig.add_hline(y=r.value, line_dash="dash", annotation_text=r.label)
-        elif ctype=="Area":
-            fig = px.area(pivot, x=pivot.index, y=pivot.columns)
-        else:
-            monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date",var_name="chain",value_name="value")
-            fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
-        fig.update_layout(margin=dict(l=20,r=20,t=40,b=20),
-                          title=metric.title())
-        st.plotly_chart(fig, use_container_width=True)
-        summary = pivot.loc[start:end].agg(["first","last"]).T
-        summary["% Change"] = (summary["last"]/summary["first"]-1)*100
-        st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]])
+        monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date",var_name="chain",value_name="value")
+        fig = px.bar(monthly,x="date",y="value",color="chain",barmode="group")
+    fig.update_layout(margin=dict(l=20,r=20,t=40,b=20),title=metric_sel.title())
+    st.plotly_chart(fig, use_container_width=True)
+    summary = pivot.loc[pd.to_datetime(start):pd.to_datetime(end)].agg(["first","last"]).T
+    summary["% Change"] = (summary["last"]/summary["first"]-1)*100
+    st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]])
