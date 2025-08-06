@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# --- Data loading with caching for performance ----------------------------
+# --- Data loading with caching --------------------------------------------
 
 @st.cache_data
 def load_chain_wide():
@@ -13,13 +13,11 @@ def load_chain_wide():
         data_dir = base / sub
         files = sorted(data_dir.glob("master_chain_metrics*.csv"))
         if files:
-            # Detect date column in header
             sample = pd.read_csv(files[0], nrows=0)
             date_cols = [c for c in ("Date","date") if c in sample.columns]
             df = pd.read_csv(files[0], parse_dates=date_cols)
             df.columns = [c.lower() for c in df.columns]
-            # ensure 'date' column
-            if "date" not in df.columns and "Date" in df.columns:
+            if "date" in df.columns and "date" not in df.columns:
                 df = df.rename(columns={"Date":"date"})
             return df
     return pd.DataFrame()
@@ -53,23 +51,20 @@ def load_benchmarks():
 # --- App config ------------------------------------------------------------
 st.set_page_config(page_title="Blockchain & Finance Dashboard", layout="wide")
 
-# --- Sidebar -------------------------------------------------------------
+# --- Sidebar --------------------------------------------------------------
 st.sidebar.title("Navigation")
 tabs = ["Research Objectives","Regulatory Decisions","Data Overview","Insights","Comparison"]
 page = st.sidebar.radio("Go to", tabs)
 
-# Load data
+# --- Load data ------------------------------------------------------------
 df_wide = load_chain_wide()
 reg_df = load_regulatory()
 bench_df = load_benchmarks()
 
-# Prepare long-form for interactive tabs
-if not df_wide.empty:
-    # Melt wide dataframe
+# --- Prepare long-form for interactive pages -----------------------------
+if not df_wide.empty and "date" in df_wide.columns:
     long = df_wide.melt(id_vars=["date"], var_name="metric_chain", value_name="value")
-    # Ensure string type
     long["metric_chain"] = long["metric_chain"].astype(str)
-    # Split at last underscore into metric & chain
     split = long["metric_chain"].str.rsplit("_", n=1, expand=True)
     long["metric"] = split[0]
     long["chain"]  = split[1]
@@ -79,7 +74,7 @@ else:
 
 # --- Pages ---------------------------------------------------------------
 
-if page=="Research Objectives":
+if page == "Research Objectives":
     st.title("📋 Research Objectives")
     st.markdown("""
 1. **Core Concepts:** Decentralization, consensus, smart contracts.  
@@ -89,79 +84,80 @@ if page=="Research Objectives":
 5. **Adoption Trends:** On-chain usage & institutional uptake (2016–2025).
 """)
 
-elif page=="Regulatory Decisions":
+elif page == "Regulatory Decisions":
     st.title("⚖️ Regulatory & Institutional Milestones")
     if not reg_df.empty:
         st.dataframe(reg_df.sort_values("Date"), use_container_width=True)
     else:
         st.warning("No regulatory data available.")
 
-elif page=="Data Overview":
+elif page == "Data Overview":
     st.title("🔍 Data Overview")
-    if df_wide.empty:
+    if df_wide.empty or "date" not in df_wide.columns:
         st.warning("No chain data loaded.")
     else:
-        st.write(f"Data coverage: **{df_wide['date'].nunique()} days**, **{len(df_wide.columns)-1} metrics**")
+        st.write(f"Data covers **{df_wide['date'].nunique()} days** × **{len(df_wide.columns)-1} metrics**")
         st.dataframe(df_wide.head(10), use_container_width=True)
         with st.expander("All Columns"):
             st.write(df_wide.columns.tolist())
 
-elif page=="Insights":
+elif page == "Insights":
     st.title("💡 Dynamic Insights")
-    if chain_df.empty:
+    if chain_df.empty or "chain" not in chain_df.columns:
         st.warning("No data to show.")
     else:
         col1, col2 = st.columns(2)
         with col1:
             chains = sorted(chain_df["chain"].unique())
-            chain_sel = st.selectbox("Chain", chains, index=0)
+            chain_sel = st.selectbox("Chain", chains)
         with col2:
             metrics = sorted(chain_df["metric"].unique())
-            metric_sel = st.selectbox("Metric", metrics, index=0)
-        dfc = chain_df[(chain_df.chain==chain_sel)&(chain_df.metric==metric_sel)].set_index("date").sort_index()
+            metric_sel = st.selectbox("Metric", metrics)
+        dfc = chain_df[(chain_df.chain==chain_sel)&(chain_df.metric==metric_sel)]
         if dfc.empty:
-            st.warning("No data for this selection.")
+            st.warning("No data for selection.")
         else:
+            dfc = dfc.set_index("date").sort_index()
             latest = dfc["value"].iat[-1]
             st.metric(f"{metric_sel.replace('_',' ').title()} ({chain_sel.title()})", f"{latest:.4f}")
-            fig = px.line(dfc, x=dfc.index, y="value",
-                          title=f"{metric_sel.replace('_',' ').title()} — {chain_sel.title()}",
+            fig = px.line(dfc, y="value", title=f"{metric_sel.replace('_',' ').title()} — {chain_sel.title()}",
                           labels={"value":metric_sel.replace("_"," ").title(),"date":"Date"})
             st.plotly_chart(fig, use_container_width=True)
             pct = (dfc["value"].iloc[-1]/dfc["value"].iloc[0]-1)*100
             st.markdown(f"**Insight:** {chain_sel.title()}'s **{metric_sel.replace('_',' ').title()}** changed **{pct:.1f}%** since {dfc.index[0].date()}.")
 
-elif page=="Comparison":
+elif page == "Comparison":
     st.title("⚔️ Chain & Legacy Comparison")
-    if chain_df.empty:
+    if chain_df.empty or "chain" not in chain_df.columns:
         st.warning("No data to compare.")
     else:
-        st.markdown("**Choose metric, date range, chart type, and toggle benchmarks.**")
+        st.markdown("**Select metric, date range, chart type, and toggle benchmarks.**")
         metrics = sorted(chain_df["metric"].unique())
-        metric_sel = st.selectbox("Metric", metrics, index=0)
+        metric_sel = st.selectbox("Metric", metrics)
         dmin, dmax = chain_df.date.min(), chain_df.date.max()
         start, end = st.slider("Date Range", value=(dmin,dmax), min_value=dmin, max_value=dmax)
         chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
         show_bench = st.checkbox("Show Traditional Benchmarks", value=True)
         dfc = chain_df[(chain_df.metric==metric_sel)&(chain_df.date.between(start,end))]
         pivot = dfc.pivot(index="date", columns="chain", values="value")
-        # Build chart
-        if chart_type=="Line":
+        if chart_type == "Line":
             fig = go.Figure()
             for c in pivot.columns:
                 fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c.title()))
             if show_bench:
-                bench_rows = bench_df[bench_df.benchmark==metric_sel]
-                for _,row in bench_rows.iterrows():
+                for _,row in bench_df[bench_df.benchmark==metric_sel].iterrows():
                     fig.add_hline(y=row.value, line_dash="dash", annotation_text=row.label, annotation_position="top left")
-        elif chart_type=="Area":
+        elif chart_type == "Area":
             fig = px.area(pivot, x=pivot.index, y=pivot.columns)
-        else:  # Bar chart by month
+        else:
             monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
             fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
         fig.update_layout(title=metric_sel.replace("_"," ").title(), margin=dict(l=20,r=20,t=40,b=20))
         st.plotly_chart(fig, use_container_width=True)
-        # Insights table
+
         summary = pivot.loc[start:end].agg(["first","last"]).T
         summary["% Change"] = (summary["last"]/summary["first"]-1)*100
-        st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]], use_container_width=True)
+        st.dataframe(
+            summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
+            use_container_width=True
+        )
