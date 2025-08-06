@@ -249,32 +249,27 @@ elif page=="Forecast":
             fig.update_layout(title=f"{chain_sel.upper()} Price Forecast (30d)", xaxis_title="Date", yaxis_title="Price", margin=dict(l=20,r=20,t=40,b=20))
             st.plotly_chart(fig, use_container_width=True)
 
-elif page=="Comparison":
-    st.title("⚔️ Chain vs. Benchmarks")
-    if chain_df.empty:
-        st.warning("No data to compare.")
-        st.stop()
-    metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
-    dmin, dmax = chain_df.date.min(), chain_df.date.max()
-    start, end = st.slider("Date Range", min_value=dmin, max_value=dmax, value=(dmin,dmax))
-    chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
-    show_bench = st.checkbox("Show Benchmarks", True)
-    dfc = chain_df.query("metric==@metric_sel and date>=@start and date<=@end")
-    pivot = dfc.pivot(index="date", columns="chain", values="value")
-    if chart_type=="Line":
-        fig = go.Figure()
-        for c in pivot.columns:
-            fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c))
-        if show_bench:
-            for _,r in bench_df[bench_df.benchmark==metric_sel].iterrows():
-                fig.add_hline(y=r.value, line_dash="dash", annotation_text=r.label)
-    elif chart_type=="Area":
-        fig = px.area(pivot, x=pivot.index, y=pivot.columns)
-    else:
-        monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
-        fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
-    fig.update_layout(title=metric_sel, margin=dict(l=20,r=20,t=40,b=20))
-    st.plotly_chart(fig, use_container_width=True)
-    summary = pivot.loc[start:end].agg(["first","last"]).T
-    summary["% Change"] = (summary["last"]/summary["first"] - 1)*100
-    st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]], use_container_width=True)
+@@ elif page=="Comparison":
+-    metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
+-    dmin, dmax = chain_df.date.min(), chain_df.date.max()
+-    start, end = st.slider("Date Range", min_value=dmin, max_value=dmax, value=(dmin,dmax))
++    metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
++    # Force slider to use pandas Timestamps
++    dmin_ts = pd.to_datetime(chain_df.date.min())
++    dmax_ts = pd.to_datetime(chain_df.date.max())
++    start_ts, end_ts = st.slider(
++        "Date Range",
++        min_value=dmin_ts,
++        max_value=dmax_ts,
++        value=(dmin_ts, dmax_ts),
++        format="YYYY-MM-DD"
++    )
++    # Convert back to date for filtering
++    start, end = start_ts.date(), end_ts.date()
+     chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
+     show_bench = st.checkbox("Show Benchmarks", True)
+ 
+-    dfc = chain_df.query("metric==@metric_sel and date>=@start and date<=@end")
++    dfc = chain_df.query("metric==@metric_sel and date>=@start and date<=@end")
+     pivot = dfc.pivot(index="date", columns="chain", values="value")
+
