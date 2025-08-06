@@ -17,7 +17,7 @@ def load_chain_wide():
             date_cols = [c for c in ("Date", "date") if c in sample.columns]
             df = pd.read_csv(files[0], parse_dates=date_cols)
             df.columns = [c.lower() for c in df.columns]
-            if "date" not in df.columns and "date" in df.columns:
+            if "date" not in df.columns and "Date" in df.columns:
                 df = df.rename(columns={"Date": "date"})
             return df
     return pd.DataFrame()
@@ -65,21 +65,24 @@ df_wide = load_chain_wide()
 reg_df = load_regulatory()
 bench_df = load_benchmarks()
 
-# --- Build long-form chain_df safely --------------------------------------
+# --- Build long-form chain_df ---------------------------------------------
 chains = ["bitcoin","ethereum","solana"]
 chain_records = []
 if not df_wide.empty and "date" in df_wide.columns:
     for chain in chains:
-        # find all columns ending with _chain
         for col in df_wide.columns:
             if col.endswith(f"_{chain}"):
-                metric = col[: - (len(chain) + 1)]
+                metric = col[:-(len(chain)+1)]
                 sub = df_wide[["date", col]].rename(columns={col: "value"})
                 sub = sub.assign(chain=chain, metric=metric)
                 chain_records.append(sub.dropna(subset=["value"]))
-    chain_df = pd.concat(chain_records, ignore_index=True)
+    chain_df = pd.concat(chain_records, ignore_index=True) if chain_records else pd.DataFrame()
 else:
     chain_df = pd.DataFrame()
+
+# Convert date column to Python date for sliders
+if not chain_df.empty:
+    chain_df["date"] = pd.to_datetime(chain_df["date"]).dt.date
 
 # --- Pages ---------------------------------------------------------------
 
@@ -133,11 +136,11 @@ elif page == "Insights":
     fig = px.line(
         dfc, y="value",
         title=f"{metric_sel.replace('_',' ').title()} — {chain_sel.title()}",
-        labels={"value": metric_sel.replace("_"," ").title(), "date":"Date"}
+        labels={"value": metric_sel.replace("_", " ").title(), "date":"Date"}
     )
     st.plotly_chart(fig, use_container_width=True)
     pct = (dfc["value"].iloc[-1] / dfc["value"].iloc[0] - 1) * 100
-    st.markdown(f"**Insight:** {chain_sel.title()}'s **{metric_sel.replace('_',' ').title()}** changed **{pct:.1f}%** since {dfc.index[0].date()}.")
+    st.markdown(f"**Insight:** {chain_sel.title()}'s **{metric_sel.replace('_',' ').title()}** changed **{pct:.1f}%** since {dfc.index[0]}.")
 
 elif page == "Comparison":
     st.title("⚔️ Chain & Legacy Comparison")
