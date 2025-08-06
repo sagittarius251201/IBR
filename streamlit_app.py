@@ -187,22 +187,57 @@ elif page=="Correlation":
 elif page=="Forecast":
     st.title("🔮 Price Forecast")
     if not has_prophet:
-        st.warning("Install `prophet`.")
+        st.warning("Install `prophet` to enable forecasting.")
     else:
-        # find all chains with a price_ column
+        # detect available chains with price_ columns
         price_cols = [c for c in df_wide.columns if c.startswith("price_")]
-        chains_av = [c.split("_",1)[1] for c in price_cols]
-        chain_sel = st.selectbox("Chain to forecast", chains_av, index=0)
-        col = f"price_{chain_sel}"
-        dfp = df_wide[["date",col]].rename(columns={"date":"ds",col:"y"}).dropna()
-        m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-        m.fit(dfp)
-        future = m.make_future_dataframe(periods=30)
-        fc = m.predict(future)
-        fig = px.line(fc, x="ds", y=["y","yhat","yhat_upper","yhat_lower"],
-                      labels={"value":"Price","ds":"Date"},
-                      title=f"{chain_sel.upper()} Price Forecast (30d)")
-        st.plotly_chart(fig, use_container_width=True)
+        if not price_cols:
+            st.warning("No price series found for forecasting.")
+        else:
+            chains_av = [c.split("_",1)[1] for c in price_cols]
+            chain_sel = st.selectbox("Chain to forecast", chains_av, index=0)
+            col = f"price_{chain_sel}"
+            dfp = (
+                df_wide[["date", col]]
+                .rename(columns={"date":"ds", col:"y"})
+                .dropna()
+            )
+            # fit prophet
+            m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+            m.fit(dfp)
+            future = m.make_future_dataframe(periods=30)
+            fc = m.predict(future)
+            
+            # merge actual & forecast for plotting
+            merged = fc[["ds","yhat","yhat_lower","yhat_upper"]].merge(dfp, on="ds", how="left")
+            
+            fig = go.Figure()
+            # forecast
+            fig.add_trace(go.Scatter(
+                x=merged["ds"], y=merged["yhat"], mode="lines", name="Forecast"
+            ))
+            # confidence interval
+            fig.add_trace(go.Scatter(
+                x=merged["ds"], y=merged["yhat_upper"],
+                mode="lines", line=dict(width=0), showlegend=False
+            ))
+            fig.add_trace(go.Scatter(
+                x=merged["ds"], y=merged["yhat_lower"],
+                mode="lines", fill="tonexty", line=dict(width=0),
+                fillcolor="rgba(0,100,80,0.2)", name="Confidence Interval"
+            ))
+            # actual
+            fig.add_trace(go.Scatter(
+                x=merged["ds"], y=merged["y"], mode="lines", name="Actual"
+            ))
+            
+            fig.update_layout(
+                title=f"{chain_sel.upper()} Price Forecast (30d)",
+                xaxis_title="Date", yaxis_title="Price",
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
 
 elif page=="Comparison":
     st.title("⚔️ Comparison")
