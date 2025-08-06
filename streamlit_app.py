@@ -1,3 +1,4 @@
+import os
 
 import streamlit as st
 import pandas as pd
@@ -5,11 +6,11 @@ import plotly.express as px
 
 @st.cache_data
 def load_chain_data():
-    return pd.read_csv('data/master_chain_metrics_updated.csv', parse_dates=['date'])
+    return pd.read_csv(os.path.join(os.path.dirname(__file__), 'data', 'master_chain_metrics_updated.csv'), parse_dates=['date'])
 
 @st.cache_data
 def load_regulatory_data():
-    return pd.read_csv('data/regulatory_milestones.csv', parse_dates=['Date'])
+    return pd.read_csv(os.path.join(os.path.dirname(__file__), 'data', 'regulatory_milestones.csv'), parse_dates=['Date'])
 
 st.set_page_config(page_title='Blockchain Dashboard', layout='wide')
 
