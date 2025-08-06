@@ -19,15 +19,17 @@ def load_master():
     base = Path(__file__).parent
     for sub in ("data", "."):
         folder = base / sub
-        if not folder.exists(): continue
+        if not folder.exists():
+            continue
         files = list(folder.glob("master_chain_metrics_updated*.csv"))
-        if not files: continue
+        if not files:
+            continue
         path = files[0]
         sample = pd.read_csv(path, nrows=0)
         date_cols = [c for c in sample.columns if "date" in c.lower()]
         df = pd.read_csv(path, parse_dates=date_cols if date_cols else None, low_memory=False)
         if date_cols:
-            df = df.rename(columns={date_cols[0]:"date"})
+            df = df.rename(columns={date_cols[0]: "date"})
             df["date"] = pd.to_datetime(df["date"]).dt.date
         df.columns = [c.lower().strip() for c in df.columns]
         return df
@@ -36,8 +38,9 @@ def load_master():
 
 @st.cache_data
 def load_regulatory():
+    base = Path(__file__).parent
     for sub in ("data", "."):
-        p = Path(__file__).parent / sub / "regulatory_milestones.csv"
+        p = base / sub / "regulatory_milestones.csv"
         if p.exists():
             rdf = pd.read_csv(p, parse_dates=["Date"])
             rdf.columns = [c.lower() for c in rdf.columns]
@@ -47,9 +50,11 @@ def load_regulatory():
 
 @st.cache_data
 def load_sp500():
+    base = Path(__file__).parent
     for sub in ("data", "."):
-        folder = Path(__file__).parent / sub
-        if not folder.exists(): continue
+        folder = base / sub
+        if not folder.exists():
+            continue
         paths = list(folder.glob("*S&P*500*Historical*.csv"))
         if paths:
             sp = pd.read_csv(paths[0], parse_dates=["Date"])
@@ -63,19 +68,34 @@ def load_sp500():
 @st.cache_data
 def load_benchmarks():
     data = {
-        "benchmark":[
+        "benchmark": [
             "visa_avg_tps","visa_peak_tps","mc_avg_tps","mc_peak_tps",
-            "swift_settlement_days","dtcc_tplus1_adoption_pct","t2s_settlement_days"
+            "swift_settlement_days","dtcc_tplus1_adoption_pct","t2s_settlement_days",
+            "daily_active_addresses","daily_transactions","fees","tvl","dex_volumes"
         ],
-        "value":[1700,65000,5000,59000,1.25,95,0.10]
+        "value": [
+            1700,65000,5000,59000,1.25,95,0.10,
+            1_000_000,   # legacy daily active addresses
+            5_000_000,   # legacy daily transactions
+            1.00,        # avg fee in USD
+            1e12,        # legacy TVL in USD
+            2e8          # legacy DEX daily volume in USD
+        ]
     }
     df = pd.DataFrame(data)
     df["label"] = df["benchmark"].map({
-        "visa_avg_tps":"Visa Avg TPS","visa_peak_tps":"Visa Peak TPS",
-        "mc_avg_tps":"Mastercard Avg TPS","mc_peak_tps":"Mastercard Peak TPS",
+        "visa_avg_tps":"Visa Avg TPS",
+        "visa_peak_tps":"Visa Peak TPS",
+        "mc_avg_tps":"Mastercard Avg TPS",
+        "mc_peak_tps":"Mastercard Peak TPS",
         "swift_settlement_days":"SWIFT gpi Avg Settlement (days)",
         "dtcc_tplus1_adoption_pct":"DTCC T+1 Adoption (%)",
-        "t2s_settlement_days":"ECB T2S Avg Settlement (days)"
+        "t2s_settlement_days":"ECB T2S Avg Settlement (days)",
+        "daily_active_addresses":"Legacy Daily Active Addrs",
+        "daily_transactions":"Legacy Daily Txns",
+        "fees":"Legacy Avg Fee (USD)",
+        "tvl":"Legacy TVL (USD)",
+        "dex_volumes":"Legacy DEX Volume (USD)"
     })
     return df
 
@@ -99,7 +119,7 @@ reg_df    = load_regulatory()
 sp500_df  = load_sp500()
 bench_df  = load_benchmarks()
 
-# --- Unpivot to long ------------------------------------------------------
+# --- Unpivot to long form -----------------------------------------------
 chains = ["bitcoin","ethereum","solana"] + (["sp500"] if not sp500_df.empty else [])
 records = []
 if not df_wide.empty:
@@ -107,14 +127,14 @@ if not df_wide.empty:
         parts = col.rsplit("_",1)
         if len(parts)==2 and parts[1] in chains:
             metric, chain = parts
-            tmp = df_wide[["date",col]].dropna().rename(columns={col:"value"})
+            tmp = df_wide[["date",col]].rename(columns={col:"value"}).dropna()
             tmp["chain"], tmp["metric"] = chain, metric
             records.append(tmp)
 if not sp500_df.empty:
     records.append(sp500_df)
 chain_df = pd.concat(records, ignore_index=True) if records else pd.DataFrame()
 if not chain_df.empty:
-    chain_df["date"] = pd.to_datetime(chain_df["date"]).dt.date
+    chain_df["date"] = pd.to_datetime(chain_df["date"])
 
 # --- Pages ---------------------------------------------------------------
 if page=="Research Objectives":
@@ -132,34 +152,25 @@ elif page=="Regulatory Timeline":
     if reg_df.empty:
         st.warning("No regulatory data.")
     else:
-        # Ensure lowercase columns
-        if "date" not in reg_df.columns:
-            st.error("Regulatory CSV missing 'date' column.")
-        else:
-            df = reg_df.copy()
-            # sort by date
-            df = df.sort_values("date")
-            # scatter each milestone
-            fig = px.scatter(
-                df,
-                x="date",
-                y="milestone",
-                title="Regulatory & Institutional Milestones",
-                hover_data={"date":True, "milestone":True},
+        df = reg_df.sort_values("date")
+        fig = px.scatter(
+            df,
+            x="date",
+            y="milestone",
+            title="Regulatory & Institutional Milestones",
+            hover_data={"date":True, "milestone":True},
+        )
+        for _, row in df.iterrows():
+            fig.add_shape(
+                type="line",
+                x0=row.date, x1=row.date,
+                y0=-0.5, y1=len(df.milestone)-0.5,
+                line=dict(color="LightGray", width=1, dash="dot"),
+                xref="x", yref="y"
             )
-            # draw a horizontal line for each point
-            for _, row in df.iterrows():
-                fig.add_shape(
-                    type="line",
-                    x0=row.date, x1=row.date,
-                    y0=-0.5, y1=len(df["milestone"])-0.5,
-                    line=dict(color="LightGray", width=1, dash="dot"),
-                    xref="x", yref="y"
-                )
-            fig.update_yaxes(autorange="reversed")
-            fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig, use_container_width=True)
-
+        fig.update_yaxes(autorange="reversed")
+        fig.update_layout(margin=dict(l=20,r=20,t=40,b=20))
+        st.plotly_chart(fig, use_container_width=True)
 
 elif page=="Data Overview":
     st.title("🔍 Data Overview")
@@ -168,6 +179,8 @@ elif page=="Data Overview":
     else:
         st.write(f"**{df_wide['date'].nunique()} days × {len(df_wide.columns)-1} metrics**")
         st.dataframe(df_wide.head(), use_container_width=True)
+        with st.expander("All columns"):
+            st.write(df_wide.columns.tolist())
 
 elif page=="Insights":
     st.title("💡 Dynamic Insights")
@@ -203,7 +216,7 @@ elif page=="Correlation":
             st.write(f"Pearson r = **{r:.3f}**")
             fig = px.scatter(dfc, x=x, y=y, trendline="ols")
         else:
-            fig = px.imshow(corr, text_auto=True, title="Correlation matrix")
+            fig = px.imshow(corr, text_auto=True, title="Correlation Matrix")
         st.plotly_chart(fig, use_container_width=True)
 
 elif page=="Forecast":
@@ -211,101 +224,57 @@ elif page=="Forecast":
     if not has_prophet:
         st.warning("Install `prophet` to enable forecasting.")
     else:
-        # detect available chains with price_ columns
         price_cols = [c for c in df_wide.columns if c.startswith("price_")]
         if not price_cols:
-            st.warning("No price series found for forecasting.")
+            st.warning("No price series for forecasting.")
         else:
             chains_av = [c.split("_",1)[1] for c in price_cols]
             chain_sel = st.selectbox("Chain to forecast", chains_av, index=0)
             col = f"price_{chain_sel}"
-            dfp = (
-                df_wide[["date", col]]
-                .rename(columns={"date":"ds", col:"y"})
-                .dropna()
-            )
-            if dfp.empty:
-                st.warning("No historical data for that chain.")
-            else:
-                # ensure ds is datetime
-                dfp["ds"] = pd.to_datetime(dfp["ds"])
-                # fit Prophet
-                m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-                m.fit(dfp)
-                future = m.make_future_dataframe(periods=30)
-                fc = m.predict(future)
-                
-                # convert both to date for merging
-                fc["ds_date"]  = fc["ds"].dt.date
-                dfp["ds_date"] = dfp["ds"].dt.date
-                
-                merged = pd.merge(
-                    fc[["ds","yhat","yhat_lower","yhat_upper","ds_date"]],
-                    dfp[["ds_date","y"]],
-                    on="ds_date",
-                    how="left"
-                )
-                
-                fig = go.Figure()
-                # forecast line
-                fig.add_trace(go.Scatter(
-                    x=merged["ds"], y=merged["yhat"], mode="lines", name="Forecast"
-                ))
-                # confidence band
-                fig.add_trace(go.Scatter(
-                    x=merged["ds"], y=merged["yhat_upper"],
-                    mode="lines", line=dict(width=0), showlegend=False
-                ))
-                fig.add_trace(go.Scatter(
-                    x=merged["ds"], y=merged["yhat_lower"],
-                    mode="lines", fill="tonexty", line=dict(width=0),
-                    fillcolor="rgba(0,100,80,0.2)", name="Confidence Interval"
-                ))
-                # actuals
-                fig.add_trace(go.Scatter(
-                    x=merged["ds"], y=merged["y"], mode="markers+lines",
-                    marker_symbol="circle-open", name="Actual"
-                ))
-                
-                fig.update_layout(
-                    title=f"{chain_sel.upper()} Price Forecast (30d)",
-                    xaxis_title="Date", yaxis_title="Price",
-                    margin=dict(l=20, r=20, t=40, b=20)
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-
+            dfp = df_wide[["date",col]].rename(columns={"date":"ds",col:"y"}).dropna()
+            dfp["ds"] = pd.to_datetime(dfp["ds"])
+            m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+            m.fit(dfp)
+            future = m.make_future_dataframe(periods=30)
+            fc = m.predict(future)
+            # merge on date
+            fc["ds_date"] = fc["ds"].dt.date
+            dfp["ds_date"] = dfp["ds"].dt.date
+            merged = pd.merge(fc, dfp[["ds_date","y"]], on="ds_date", how="left")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=merged["ds"], y=merged["yhat"], mode="lines", name="Forecast"))
+            fig.add_trace(go.Scatter(x=merged["ds"], y=merged["yhat_upper"], mode="lines", line=dict(width=0), showlegend=False))
+            fig.add_trace(go.Scatter(x=merged["ds"], y=merged["yhat_lower"], mode="lines", fill="tonexty", line=dict(width=0), fillcolor="rgba(0,100,80,0.2)", name="Confidence Interval"))
+            fig.add_trace(go.Scatter(x=merged["ds"], y=merged["y"], mode="markers+lines", marker_symbol="circle-open", name="Actual"))
+            fig.update_layout(title=f"{chain_sel.upper()} Price Forecast (30d)", xaxis_title="Date", yaxis_title="Price", margin=dict(l=20,r=20,t=40,b=20))
+            st.plotly_chart(fig, use_container_width=True)
 
 elif page=="Comparison":
-    st.title("⚔️ Comparison")
+    st.title("⚔️ Chain vs. Benchmarks")
     if chain_df.empty:
-        st.warning("No data.")
+        st.warning("No data to compare.")
         st.stop()
     metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
     dmin, dmax = chain_df.date.min(), chain_df.date.max()
     start, end = st.slider("Date Range", min_value=dmin, max_value=dmax, value=(dmin,dmax))
-    ctype = st.selectbox("Chart Type", ["Line","Area","Bar"])
+    chart_type = st.selectbox("Chart Type", ["Line","Area","Bar"])
     show_bench = st.checkbox("Show Benchmarks", True)
-
     dfc = chain_df.query("metric==@metric_sel and date>=@start and date<=@end")
     pivot = dfc.pivot(index="date", columns="chain", values="value")
-
-    if ctype=="Line":
+    if chart_type=="Line":
         fig = go.Figure()
         for c in pivot.columns:
-            fig.add_trace(go.Scatter(x=pivot.index,y=pivot[c],mode="lines",name=c))
+            fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c))
         if show_bench:
-            for _,r in load_benchmarks().query("benchmark==@metric_sel").iterrows():
-                fig.add_hline(y=r.value,line_dash="dash",annotation_text=r.label)
-    elif ctype=="Area":
+            for _,r in bench_df[bench_df.benchmark==metric_sel].iterrows():
+                fig.add_hline(y=r.value, line_dash="dash", annotation_text=r.label)
+    elif chart_type=="Area":
         fig = px.area(pivot, x=pivot.index, y=pivot.columns)
     else:
-        monthly = pivot.resample("M").mean().reset_index().melt(
-            id_vars="date", var_name="chain", value_name="value")
+        monthly = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
         fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
-
     fig.update_layout(title=metric_sel, margin=dict(l=20,r=20,t=40,b=20))
     st.plotly_chart(fig, use_container_width=True)
     summary = pivot.loc[start:end].agg(["first","last"]).T
-    summary["% Change"] = (summary["last"]/summary["first"]-1)*100
-    st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]])
+    summary["% Change"] = (summary["last"]/summary["first"] - 1)*100
+    st.dataframe(summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]], use_container_width=True)
