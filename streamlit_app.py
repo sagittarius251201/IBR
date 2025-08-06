@@ -281,25 +281,37 @@ elif page == "Comparison":
     # Summary
      # After plotting the chart…
 
+        # After plotting the chart…
+
     # Summary table only if there's data
     if not dfc.empty:
-        # get the first and last dates in the filtered pivot
-        idx = pivot.index
-        first_date, last_date = idx[0], idx[-1]
+        # get the first and last timestamps in the filtered data
+        dates = pivot.index
+        first_date, last_date = dates[0], dates[-1]
 
-        # extract start and end values per chain
+        # extract per‐chain start/end values
         start_vals = pivot.loc[first_date]
         end_vals   = pivot.loc[last_date]
 
+        # build summary DataFrame
         summary = pd.DataFrame({
             "Start": start_vals,
             "End":   end_vals,
         })
         summary["% Change"] = (summary["End"] / summary["Start"] - 1) * 100
 
-        # show it
+        # name the index so reset_index() creates a 'Chain' column
+        summary.index.name = "Chain"
+        summary = summary.reset_index()
+
+        # display only the columns you need
         st.dataframe(
-            summary.reset_index()
+            summary[["Chain", "Start", "End", "% Change"]],
+            use_container_width=True
+        )
+    else:
+        st.info("No data points in the selected date range to summarize.")
+
                    .rename(columns={"index":"Chain"})
                    [["Chain","Start","End","% Change"]],
             use_container_width=True
