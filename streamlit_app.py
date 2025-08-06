@@ -1,6 +1,4 @@
-import os
 from pathlib import Path
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,26 +7,28 @@ import plotly.express as px
 
 @st.cache_data
 def load_chain_data():
-    data_dir = Path(__file__).parent / "data"
-    # find the first CSV matching our master chain metrics
-    csvs = sorted(data_dir.glob("master_chain_metrics*.csv"))
-    if not csvs:
-        st.error(f"No master_chain_metrics CSV found in {data_dir}")
-        return pd.DataFrame()
-    df = pd.read_csv(csvs[0], parse_dates=["Date"])
-    # standardize column names to lowercase
-    df.columns = [c.lower() for c in df.columns]
-    return df
+    # Try data/ folder first, then repo root
+    base = Path(__file__).parent
+    for sub in ["data", "."]:
+        data_dir = base / sub
+        csvs = sorted(data_dir.glob("master_chain_metrics*.csv"))
+        if csvs:
+            df = pd.read_csv(csvs[0], parse_dates=["Date"])
+            df.columns = [c.lower() for c in df.columns]
+            return df
+    st.error("No `master_chain_metrics*.csv` found in data/ or repo root.")
+    return pd.DataFrame()
 
 @st.cache_data
 def load_regulatory_data():
-    data_dir = Path(__file__).parent / "data"
-    path = data_dir / "regulatory_milestones.csv"
-    if not path.exists():
-        st.error(f"No regulatory_milestones.csv found in {data_dir}")
-        return pd.DataFrame()
-    df = pd.read_csv(path, parse_dates=["Date"])
-    return df
+    base = Path(__file__).parent
+    for sub in ["data", "."]:
+        path = base / sub / "regulatory_milestones.csv"
+        if path.exists():
+            df = pd.read_csv(path, parse_dates=["Date"])
+            return df
+    st.error("No `regulatory_milestones.csv` found in data/ or repo root.")
+    return pd.DataFrame()
 
 # --- App configuration -----------------------------------------------------
 
@@ -81,52 +81,59 @@ elif page == "Regulatory Decisions":
 
 elif page == "Data Overview":
     st.title("🔍 Data Overview")
-    st.write(f"Data covers {chain_df['date'].nunique()} days × {chain_df['chain'].nunique()} chains.")
-    st.dataframe(chain_df.head(10), use_container_width=True)
-    with st.expander("Show all columns"):
-        st.write(list(chain_df.columns))
+    if not chain_df.empty:
+        days = chain_df['date'].nunique() if 'date' in chain_df else len(chain_df)
+        chains = chain_df['chain'].nunique() if 'chain' in chain_df else "?"
+        st.write(f"Data covers {days} days × {chains} chains.")
+        st.dataframe(chain_df.head(10), use_container_width=True)
+        with st.expander("Show all columns"):
+            st.write(list(chain_df.columns))
+    else:
+        st.warning("No chain data loaded.")
 
 # --- Page: Insights --------------------------------------------------------
 
 elif page == "Insights":
     st.title("💡 Dynamic Insights")
-    # Select chain and metric
-    chains = sorted(chain_df["chain"].unique())
-    chain_sel = st.selectbox("Select Chain", chains, index=chains.index("bitcoin"))
-    metric_cols = [c for c in chain_df.columns if c not in ["date", "chain"]]
-    metric_sel = st.selectbox("Select Metric", metric_cols)
-
-    df_chain = chain_df[chain_df["chain"] == chain_sel]
-    latest = df_chain.iloc[-1][metric_sel]
-
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.metric(
-            label=f"Latest {metric_sel.replace('_', ' ').title()} ({chain_sel.title()})",
-            value=f"{latest:.4f}"
-        )
-    with col2:
-        fig = px.line(
-            df_chain, x="date", y=metric_sel,
-            title=f"{metric_sel.replace('_', ' ').title()} Over Time — {chain_sel.title()}",
-            labels={"date": "Date", metric_sel: metric_sel.replace("_", " ").title()}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    if chain_df.empty:
+        st.warning("No chain data to show.")
+    else:
+        chains = sorted(chain_df["chain"].unique())
+        chain_sel = st.selectbox("Select Chain", chains, index=0)
+        metrics = [c for c in chain_df.columns if c not in ["date", "chain"]]
+        metric_sel = st.selectbox("Select Metric", metrics)
+        dfc = chain_df[chain_df["chain"] == chain_sel]
+        if dfc.empty or metric_sel not in dfc:
+            st.warning("No data for this selection.")
+        else:
+            latest = dfc.iloc[-1][metric_sel]
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.metric(
+                    label=f"{metric_sel.replace('_',' ').title()} ({chain_sel.title()})",
+                    value=f"{latest:.4f}"
+                )
+            with col2:
+                fig = px.line(
+                    dfc, x="date", y=metric_sel,
+                    title=f"{metric_sel.replace('_',' ').title()} over Time — {chain_sel.title()}",
+                    labels={"date": "Date", metric_sel: metric_sel.replace("_", " ").title()}
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
 # --- Page: Comparison ------------------------------------------------------
 
 elif page == "Comparison":
     st.title("⚔️ Chain Comparison")
-    metric_cols = [c for c in chain_df.columns if c not in ["date", "chain"]]
-    metric_sel = st.selectbox("Metric to Compare", metric_cols)
-
-    pivot = chain_df.pivot(index="date", columns="chain", values=metric_sel)
-    fig = px.line(
-        pivot,
-        labels={"value": metric_sel.replace("_", " ").title(), "date": "Date"},
-        title=f"Comparison of {metric_sel.replace('_', ' ').title()}"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# --- End of app ------------------------------------------------------------
-
+    if chain_df.empty:
+        st.warning("No chain data to compare.")
+    else:
+        metrics = [c for c in chain_df.columns if c not in ["date","chain"]]
+        metric_sel = st.selectbox("Metric to Compare", metrics, index=0)
+        pivot = chain_df.pivot(index="date", columns="chain", values=metric_sel)
+        fig = px.line(
+            pivot,
+            labels={"value": metric_sel.replace("_"," ").title(), "date": "Date"},
+            title=f"Comparison of {metric_sel.replace('_',' ').title()}"
+        )
+        st.plotly_chart(fig, use_container_width=True)
