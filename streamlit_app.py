@@ -279,17 +279,29 @@ elif page == "Comparison":
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary
+     # After plotting the chart…
+
+    # Summary table only if there's data
     if not dfc.empty:
-        # first/last values and percent change
-        summary = (
-            pivot
-            .loc[pd.to_datetime(start_dt):pd.to_datetime(end_dt)]
-            .agg(["first", "last"])
-            .T
-        )
-        summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
+        # get the first and last dates in the filtered pivot
+        idx = pivot.index
+        first_date, last_date = idx[0], idx[-1]
+
+        # extract start and end values per chain
+        start_vals = pivot.loc[first_date]
+        end_vals   = pivot.loc[last_date]
+
+        summary = pd.DataFrame({
+            "Start": start_vals,
+            "End":   end_vals,
+        })
+        summary["% Change"] = (summary["End"] / summary["Start"] - 1) * 100
+
+        # show it
         st.dataframe(
-            summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
+            summary.reset_index()
+                   .rename(columns={"index":"Chain"})
+                   [["Chain","Start","End","% Change"]],
             use_container_width=True
         )
     else:
