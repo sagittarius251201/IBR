@@ -3,11 +3,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-@st.cache
+@st.cache_data
 def load_chain_data():
     return pd.read_csv('data/master_chain_metrics_updated.csv', parse_dates=['date'])
 
-@st.cache
+@st.cache_data
 def load_regulatory_data():
     return pd.read_csv('data/regulatory_milestones.csv', parse_dates=['Date'])
 
