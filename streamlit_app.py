@@ -132,12 +132,34 @@ elif page=="Regulatory Timeline":
     if reg_df.empty:
         st.warning("No regulatory data.")
     else:
-        fig = px.timeline(
-            reg_df, x_start="date", x_end="date", y="milestone",
-            title="Regulatory & Institutional Milestones"
-        )
-        fig.update_yaxes(autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
+        # Ensure lowercase columns
+        if "date" not in reg_df.columns:
+            st.error("Regulatory CSV missing 'date' column.")
+        else:
+            df = reg_df.copy()
+            # sort by date
+            df = df.sort_values("date")
+            # scatter each milestone
+            fig = px.scatter(
+                df,
+                x="date",
+                y="milestone",
+                title="Regulatory & Institutional Milestones",
+                hover_data={"date":True, "milestone":True},
+            )
+            # draw a horizontal line for each point
+            for _, row in df.iterrows():
+                fig.add_shape(
+                    type="line",
+                    x0=row.date, x1=row.date,
+                    y0=-0.5, y1=len(df["milestone"])-0.5,
+                    line=dict(color="LightGray", width=1, dash="dot"),
+                    xref="x", yref="y"
+                )
+            fig.update_yaxes(autorange="reversed")
+            fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+            st.plotly_chart(fig, use_container_width=True)
+
 
 elif page=="Data Overview":
     st.title("🔍 Data Overview")
