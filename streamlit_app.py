@@ -210,49 +210,78 @@ elif page=="Forecast":
             fig.update_layout(title=f"{chain_sel.upper()} 30d Forecast", xaxis_title="Date", yaxis_title="Price")
             st.plotly_chart(fig, use_container_width=True)
 
-elif page=="Comparison":
-    st.title("⚔️ Comparison")
+elif page == "Comparison":
+    st.title("⚔️ Chain vs. Benchmarks")
     if chain_df.empty:
-        st.warning("No data."); st.stop()
-    metric_sel = st.selectbox("Metric", sorted(chain_df.metric.unique()))
-    # slider only sees pd.Timestamp
-    dmin_ts = chain_df.date.min()
-    dmax_ts = chain_df.date.max()
-    start_ts, end_ts = st.slider(
+        st.warning("No data to compare.")
+        st.stop()
+
+    metric_sel = st.selectbox("Metric", sorted(chain_df["metric"].unique()))
+
+    # Get native Python datetimes for slider
+    dmin_np = chain_df["date"].min()
+    dmax_np = chain_df["date"].max()
+    dmin = pd.to_datetime(dmin_np).to_pydatetime()
+    dmax = pd.to_datetime(dmax_np).to_pydatetime()
+
+    start_dt, end_dt = st.slider(
         "Date Range",
-        min_value=dmin_ts,
-        max_value=dmax_ts,
-        value=(dmin_ts, dmax_ts),
+        min_value=dmin,
+        max_value=dmax,
+        value=(dmin, dmax),
         format="YYYY-MM-DD"
     )
-    # filter still on Timestamp
-    dfc = chain_df.query(
-        "metric == @metric_sel and date >= @start_ts and date <= @end_ts"
-    )
+
+    # Now filter using pandas Timestamps: convert Python datetime back
+    dfc = chain_df[
+        (chain_df["metric"] == metric_sel) &
+        (chain_df["date"] >= pd.to_datetime(start_dt)) &
+        (chain_df["date"] <= pd.to_datetime(end_dt))
+    ]
+
     pivot = dfc.pivot(index="date", columns="chain", values="value")
 
-    chart = st.selectbox("Chart Type", ["Line","Area","Bar"])
+    chart = st.selectbox("Chart Type", ["Line", "Area", "Bar"])
     show_bench = st.checkbox("Show Benchmarks", True)
 
-    if chart=="Line":
+    if chart == "Line":
         fig = go.Figure()
         for c in pivot.columns:
-            fig.add_trace(go.Scatter(x=pivot.index, y=pivot[c], mode="lines", name=c))
+            fig.add_trace(go.Scatter(
+                x=pivot.index, y=pivot[c], mode="lines", name=c.upper()
+            ))
         if show_bench:
-            for _,r in bench_df.query("benchmark==@metric_sel").iterrows():
-                fig.add_hline(y=r.value, line_dash="dash", annotation_text=r.label)
-    elif chart=="Area":
-        fig = px.area(pivot, x=pivot.index, y=pivot.columns)
-    else:
-        mdf = pivot.resample("M").mean().reset_index().melt(id_vars="date", var_name="chain", value_name="value")
-        fig = px.bar(mdf, x="date", y="value", color="chain", barmode="group")
+            for _, r in bench_df[bench_df["benchmark"] == metric_sel].iterrows():
+                fig.add_hline(
+                    y=r.value,
+                    line_dash="dash",
+                    annotation_text=r.label,
+                    annotation_position="top left"
+                )
 
-    fig.update_layout(title=metric_sel.replace("_"," ").title(), margin=dict(l=20,r=20,t=40,b=20))
+    elif chart == "Area":
+        fig = px.area(pivot, x=pivot.index, y=pivot.columns)
+
+    else:  # Bar
+        monthly = (
+            pivot
+            .resample("M")
+            .mean()
+            .reset_index()
+            .melt(id_vars="date", var_name="chain", value_name="value")
+        )
+        fig = px.bar(monthly, x="date", y="value", color="chain", barmode="group")
+
+    fig.update_layout(
+        title=f"{metric_sel.replace('_',' ').title()} Comparison",
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-    summary = pivot.loc[start_ts:end_ts].agg(["first","last"]).T
-    summary["% Change"] = (summary["last"] / summary["first"] - 1)*100
+    # Summary
+    summary = pivot.loc[pd.to_datetime(start_dt):pd.to_datetime(end_dt)].agg(["first", "last"]).T
+    summary["% Change"] = (summary["last"] / summary["first"] - 1) * 100
     st.dataframe(
-        summary.rename(columns={"first":"Start","last":"End"})[["Start","End","% Change"]],
+        summary.rename(columns={"first": "Start", "last": "End"})[["Start", "End", "% Change"]],
         use_container_width=True
     )
