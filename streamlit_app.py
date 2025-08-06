@@ -202,41 +202,56 @@ elif page=="Forecast":
                 .rename(columns={"date":"ds", col:"y"})
                 .dropna()
             )
-            # fit prophet
-            m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-            m.fit(dfp)
-            future = m.make_future_dataframe(periods=30)
-            fc = m.predict(future)
-            
-            # merge actual & forecast for plotting
-            merged = fc[["ds","yhat","yhat_lower","yhat_upper"]].merge(dfp, on="ds", how="left")
-            
-            fig = go.Figure()
-            # forecast
-            fig.add_trace(go.Scatter(
-                x=merged["ds"], y=merged["yhat"], mode="lines", name="Forecast"
-            ))
-            # confidence interval
-            fig.add_trace(go.Scatter(
-                x=merged["ds"], y=merged["yhat_upper"],
-                mode="lines", line=dict(width=0), showlegend=False
-            ))
-            fig.add_trace(go.Scatter(
-                x=merged["ds"], y=merged["yhat_lower"],
-                mode="lines", fill="tonexty", line=dict(width=0),
-                fillcolor="rgba(0,100,80,0.2)", name="Confidence Interval"
-            ))
-            # actual
-            fig.add_trace(go.Scatter(
-                x=merged["ds"], y=merged["y"], mode="lines", name="Actual"
-            ))
-            
-            fig.update_layout(
-                title=f"{chain_sel.upper()} Price Forecast (30d)",
-                xaxis_title="Date", yaxis_title="Price",
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            if dfp.empty:
+                st.warning("No historical data for that chain.")
+            else:
+                # ensure ds is datetime
+                dfp["ds"] = pd.to_datetime(dfp["ds"])
+                # fit Prophet
+                m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+                m.fit(dfp)
+                future = m.make_future_dataframe(periods=30)
+                fc = m.predict(future)
+                
+                # convert both to date for merging
+                fc["ds_date"]  = fc["ds"].dt.date
+                dfp["ds_date"] = dfp["ds"].dt.date
+                
+                merged = pd.merge(
+                    fc[["ds","yhat","yhat_lower","yhat_upper","ds_date"]],
+                    dfp[["ds_date","y"]],
+                    on="ds_date",
+                    how="left"
+                )
+                
+                fig = go.Figure()
+                # forecast line
+                fig.add_trace(go.Scatter(
+                    x=merged["ds"], y=merged["yhat"], mode="lines", name="Forecast"
+                ))
+                # confidence band
+                fig.add_trace(go.Scatter(
+                    x=merged["ds"], y=merged["yhat_upper"],
+                    mode="lines", line=dict(width=0), showlegend=False
+                ))
+                fig.add_trace(go.Scatter(
+                    x=merged["ds"], y=merged["yhat_lower"],
+                    mode="lines", fill="tonexty", line=dict(width=0),
+                    fillcolor="rgba(0,100,80,0.2)", name="Confidence Interval"
+                ))
+                # actuals
+                fig.add_trace(go.Scatter(
+                    x=merged["ds"], y=merged["y"], mode="markers+lines",
+                    marker_symbol="circle-open", name="Actual"
+                ))
+                
+                fig.update_layout(
+                    title=f"{chain_sel.upper()} Price Forecast (30d)",
+                    xaxis_title="Date", yaxis_title="Price",
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
 
 
 elif page=="Comparison":
